@@ -14,7 +14,7 @@ if (objParamsOut.ReturnValue === 0) {
     var a = objParamsOut.sNames.toArray();
     for (var i = 0; i < a.length; ++i) {
       var key = 'HKLM\\' + objParamsIn.sSubKeyName + '\\' + a[i] + '\\Category';
-      objShell.RegWrite (key,  1, 'REG_DWORD'); 
+      objShell.RegWrite (key,  2, 'REG_DWORD'); 
     }
   }
 }
@@ -23,3 +23,5 @@ objShell.Run ('winrm quickconfig -quiet', 1, true);
 objShell.Run ('winrm set winrm/config/service/auth @{Basic="true"}', 1, true);
 objShell.Run ('winrm set winrm/config/service @{AllowUnencrypted="true"}', 1, true);
 objShell.Run ('netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=TCP action=allow', 1, true);
+
+shell.Popup ('Done!');
