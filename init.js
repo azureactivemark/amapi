@@ -1,41 +1,57 @@
 var xhr = new ActiveXObject ('MSXML2.XMLHTTP');
+var shell = new ActiveXObject ('WScript.Shell');
+var shApp = new ActiveXObject('Shell.Application')
+var fso = new ActiveXObject ('Scripting.FileSystemObject');
 
-var url = 'https://www.python.org/ftp/python/2.7.11/python-2.7.11.amd64.msi';
-var fileName = 'python-2.7.11.amd64.msi';
+// -----------------------------------------------------------------------------
+// downloadFile
+// -----------------------------------------------------------------------------
+function downloadFile (url, fileName) {
+  xhr.open ('GET', url, false);
+  xhr.send()
 
-xhr.open ('GET', url, false);
-xhr.send()
+  if (xhr.Status == 200) {
+    if (fso.FileExists (fileName))
+      fso.DeleteFile (fileName);
 
-if (xhr.Status == 200) {
-  var fso = new ActiveXObject ('Scripting.FileSystemObject');
+    WScript.Echo ('Downloading ' + fileName + '...');
 
-  if (fso.FileExists (fileName))
-    fso.DeleteFile (fileName);
+    var stream = new ActiveXObject ('ADODB.Stream');
+    stream.Open();
+    stream.Type = 1 //adTypeBinary
+    stream.Write (xhr.ResponseBody);
+    stream.Position = 0;
+    stream.SaveToFile (fileName);
+    stream.Close();
 
-  WScript.Echo ('Downloading ' + fileName + '...');
+    WScript.Echo (fileName + ' downloaded correctly');
 
-  var stream = new ActiveXObject ('ADODB.Stream');
-  stream.Open();
-  stream.Type = 1 //adTypeBinary
-  stream.Write (xhr.ResponseBody);
-  stream.Position = 0;
-  stream.SaveToFile (fileName);
-  stream.Close();
+    return true;
+  }
+  
+  WScript.Echo ('Error: HTTP ' + xhr.status + ' ' + xhr.statusText);
 
-  WScript.Echo (fileName + ' downloaded correctly');
+  return false;
+}
+
+// -----------------------------------------------------------------------------
+// installMsi
+// -----------------------------------------------------------------------------
+function installMsi (fileName) {
   WScript.Echo ('Installing ' + fileName + ' ...');
 
-  var shell = new ActiveXObject ('WScript.Shell');
-
-  //shell.Run ('msiexec /i ' + fileName + ' /quiet', 1, true);
+  shell.Run ('msiexec /i ' + fileName + ' /quiet', 1, true);
 
   WScript.Echo (fileName + 'installed correctly');
+}
 
-  WScript.Echo ('Configuring firewall ...');
-  //shell.Run ('netsh advfirewall firewall add rule name="Python27" dir=in action=allow program="C:\\Python27\\python.exe" enable=yes', 1, true);
+// -----------------------------------------------------------------------------
+// writeServerScript
+// -----------------------------------------------------------------------------
+function writeServerScript (fileName) {
+  WScript.Echo ('Serializing server script ...');
 
-  WScript.Echo ('Running server ...')
-  var file = fso.CreateTextFile ('azure-ws.py');
+  var file = fso.CreateTextFile (fileName);
   file.Write (
     'import SimpleXMLRPCServer\n' +
     'import subprocess\n' +
@@ -53,18 +69,94 @@ if (xhr.Status == 200) {
     '  exec (cmd)\n' +
     '  return 0\n' +
 
+    'def test (v) :\n' +
+    '  return v\n' +
+
     'server = SimpleXMLRPCServer.SimpleXMLRPCServer (("10.0.0.6", 80))\n' +
     'server.register_function (run)\n' +
     'server.register_function (pyexec)\n' +
+    'server.register_function (test)\n' +
     'server.serve_forever()'
   );
   file.Close();
 
-  shell.Run ('C:\\Python27\\python.exe azure-ws.py', 0, false);
-
-  WScript.Echo ("Done!")
-}
-else {
-  WScript.Echo ('Error: HTTP ' + xhr.status + ' ' + xhr.statusText)
+  WScript.Echo ("Server script serialized");
 }
 
+// -----------------------------------------------------------------------------
+// unzip
+// -----------------------------------------------------------------------------
+function unzip (fileName) {
+  WScript.Echo ('Uncompressing ' + fileName + ' ...');
+
+  var zip = shApp.NameSpace (fso.getFile (fileName).Path);
+  var dst = shApp.NameSpace (fso.getFolder ('.').Path);
+
+  for (var i = 0; i < zip.Items().Count; i++) {
+    try {
+      WScript.Echo (zip.Items().Item(i));
+      dst.CopyHere (zip.Items().Item(i), 4 + 16);
+    }
+    catch(e) {
+      WScript.Echo ('Failed: ' + e);
+
+      return false;
+    }
+  }
+
+  WScript.Echo (fileName + 'uncompressed correctly');
+
+  return true;
+}
+
+// -----------------------------------------------------------------------------
+// configureFirewall
+// -----------------------------------------------------------------------------
+function configureFirewall() {
+  WScript.Echo ('Configuring firewall ...');
+  shell.Run ('netsh advfirewall firewall add rule name="Python27" dir=in action=allow program="C:\\Python27\\python.exe" enable=yes', 1, true);
+  WScript.Echo ('Firewall configured correctly');
+}
+
+// -----------------------------------------------------------------------------
+// installService
+// -----------------------------------------------------------------------------
+function installService (nssm, script, serviceName) {
+  WScript.Echo ('Installing service ' + serviceName + ' ...');
+
+  var installCmd = nssm + ' install ' + serviceName + ' C:\\Python27\\python.exe ' + script;
+  var startCmd = nssm + ' start ' + serviceName;
+
+  shell.Run (installCmd , 1, true);
+  shell.Run (startCmd, 1, true);
+
+  WScript.Echo ('Service installed correctly');
+}
+
+// -----------------------------------------------------------------------------
+// main
+// -----------------------------------------------------------------------------
+function main() {
+  var urlPython = 'https://www.python.org/ftp/python/2.7.11/python-2.7.11.amd64.msi';
+  var fileNamePython = 'python-2.7.11.amd64.msi';
+  var urlNssm = 'http://nssm.cc/release/nssm-2.24.zip';
+  var fileNameNssm = 'nssm-2.24.zip';
+  var fileNameScript = 'C:\\azure-ws.py';
+  var nssm = "nssm-2.24\\win64\\nssm.exe";
+
+  if (
+    downloadFile (urlPython, fileNamePython) &&
+    downloadFile (urlNssm, fileNameNssm)
+  ) {
+    installMsi (fileNamePython);
+    unzip (fileNameNssm);
+    writeServerScript (fileNameScript);
+    configureFirewall();
+    installService (nssm, fileNameScript, "AmAzureServicePy");
+
+    WScript.Echo ("Everything ok!");
+  }
+}
+
+
+main();
